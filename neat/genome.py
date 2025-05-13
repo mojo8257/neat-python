@@ -55,7 +55,14 @@ class DefaultGenomeConfig(object):
         # By convention, input pins have negative keys, and the output
         # pins have keys 0,1,...
         self.input_keys = [-i - 1 for i in range(self.num_inputs)]
+        # 追加LEO输出节点坐标
         self.output_keys = [i for i in range(self.num_outputs)]
+        self.enable_leo = bool(params.get('enable_leo', False))
+        self.locality_seed = params.get('locality_seed', 'none')
+        self.leo_bias_default = float(params.get('leo_bias_default', -3.0))
+        if self.enable_leo:
+            self.leo_output_key = self.num_outputs  # 追加一位
+            self.output_keys.append(self.leo_output_key)
 
         self.connection_fraction = None
 
@@ -178,7 +185,15 @@ class DefaultGenome(object):
 
         # Create node genes for the output pins.
         for node_key in config.output_keys:
-            self.nodes[node_key] = self.create_node(config, node_key)
+            node = self.create_node(config, node_key)
+
+            # 如需要，这是 LEO 输出
+            if config.enable_leo and node_key == getattr(config, 'leo_output_key', None):
+                node.activation = 'step'
+                if config.locality_seed in ('global', 'xaxis'):
+                    node.bias = config.leo_bias_default
+
+            self.nodes[node_key] = node
 
         # Add hidden nodes if requested.
         if config.num_hidden > 0:
@@ -187,6 +202,26 @@ class DefaultGenome(object):
                 assert node_key not in self.nodes
                 node = self.create_node(config, node_key)
                 self.nodes[node_key] = node
+
+            # 若要求 Locality-Seed, 插入高斯隐藏节点
+            if config.enable_leo and config.locality_seed == 'xaxis':
+                # 新建隐藏节点
+                hid_key = config.get_new_node_key(self.nodes)  # 自带递增
+                hid = self.create_node(config, hid_key)
+                hid.activation = 'gauss'
+                hid.bias = 0.0
+                self.nodes[hid_key] = hid
+
+                # 输入节点假定顺序为   x1, y1, x2, y2, (常数)
+                x1_in, y1_in, x2_in, y2_in = config.input_keys[:4]
+
+                # Δx = x1 - x2
+                self.add_connection(config, x1_in, hid_key, 1.0, True)  # +x1
+                self.add_connection(config, x2_in, hid_key, -1.0, True)  # -x2
+
+                # 高斯节点 → LEO（正权）
+                leo_key = config.leo_output_key
+                self.add_connection(config, hid_key, leo_key, 1.0, True)
 
         # Add connections based on initial connectivity type.
 
