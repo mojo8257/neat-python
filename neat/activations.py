@@ -1,19 +1,39 @@
 """
 Has the built-in activation functions,
 code for using them,
-and code for adding new user-defined ones
-"""
+and code for adding new user-defined ones.
+
+This version adds explicit implementations for the activation
+functions requested for CPPNs in the project, namely:
+    * abs      – absolute‐value non‑linearity (already present)
+    * sigmoid  – logistic curve (already present)
+    * gauss    – Gaussian (already present)
+    * linear   – identity mapping (new alias `linear` → `linear_activation`)
+    * sin      – sine (already present)
+    * step     – binary step (new)
+    * ramp     – saturated linear ramp (new)
+    * tanh     – hyperbolic tangent (already present)
+
+The ActivationFunctionSet now registers the new aliases so that they can
+be referenced directly in configuration files, e.g. ``activation = step``.
+ """
 
 import math
 import types
 
 
+# --------------------------------------------------------------------------------------
+# Core activation primitives (existing + new)
+# --------------------------------------------------------------------------------------
+
 def sigmoid_activation(z):
+    """Scaled logistic curve with soft saturation outside ±60/5."""
     z = max(-60.0, min(60.0, 5.0 * z))
     return 1.0 / (1.0 + math.exp(-z))
 
 
 def tanh_activation(z):
+    """Scaled tanh for slightly steeper slope than the raw function."""
     z = max(-60.0, min(60.0, 2.5 * z))
     return math.tanh(z)
 
@@ -26,6 +46,36 @@ def sin_activation(z):
 def gauss_activation(z):
     z = max(-3.4, min(3.4, z))
     return math.exp(-5.0 * z ** 2)
+
+
+# ------------------------------ NEW FUNCTIONS ------------------------------------------
+
+def linear_activation(z):
+    """Simple identity mapping (alias for *linear*)."""
+    return z
+
+
+def step_activation(z):
+    """Binary step: returns 1 when *z* > 0, else 0."""
+    return 1.0 if z > 0.0 else 0.0
+
+
+def ramp_activation(z):
+    """Saturated linear ramp clipped to [-1, 1].
+
+    Values grow linearly in the interval [-1, 1] and saturate outside.
+    This implementation matches the *ramp* function used in many NEAT
+    reference implementations.
+    """
+    if z < -1.0:
+        return -1.0
+    if z > 1.0:
+        return 1.0
+    return z
+
+# --------------------------------------------------------------------------------------
+# Additional existing activation functions (unchanged)
+# --------------------------------------------------------------------------------------
 
 
 def relu_activation(z):
@@ -42,14 +92,14 @@ def lelu_activation(z):
 
 
 def selu_activation(z):
-    lam = 1.0507009873554804934193349852946
-    alpha = 1.6732632423543772848170429916717
+    lam = 1.0507009873554805
+    alpha = 1.6732632423543772
     return lam * z if z > 0.0 else lam * alpha * (math.exp(z) - 1)
 
 
 def softplus_activation(z):
     z = max(-60.0, min(60.0, 5.0 * z))
-    return 0.2 * math.log(1 + math.exp(z))
+    return 0.2 * math.log1p(math.exp(z))
 
 
 def identity_activation(z):
@@ -62,11 +112,9 @@ def clamped_activation(z):
 
 def inv_activation(z):
     try:
-        z = 1.0 / z
-    except ArithmeticError:  # handle overflows
+        return 1.0 / z
+    except ArithmeticError:  # divide‑by‑zero or overflow
         return 0.0
-    else:
-        return z
 
 
 def log_activation(z):
@@ -95,39 +143,52 @@ def cube_activation(z):
     return z ** 3
 
 
+# --------------------------------------------------------------------------------------
+# Utility helpers and activation function registry
+# --------------------------------------------------------------------------------------
+
 class InvalidActivationFunction(TypeError):
     pass
 
 
 def validate_activation(function):
-    if not isinstance(function,
-                      (types.BuiltinFunctionType,
-                       types.FunctionType,
-                       types.LambdaType)):
+    if not isinstance(function, (types.BuiltinFunctionType,
+                                 types.FunctionType,
+                                 types.LambdaType)):
         raise InvalidActivationFunction("A function object is required.")
 
-    if function.__code__.co_argcount != 1:  # avoid deprecated use of `inspect`
-        raise InvalidActivationFunction("A single-argument function is required.")
+    # Exactly one positional argument expected.
+    if function.__code__.co_argcount != 1:
+        raise InvalidActivationFunction("A single‑argument function is required.")
 
 
 class ActivationFunctionSet(object):
-    """
-    Contains the list of current valid activation functions,
-    including methods for adding and getting them.
+    """Registry of activation functions available to genomes.
+
+    Users may add their own functions at runtime via :py:meth:`add`.
     """
 
     def __init__(self):
         self.functions = {}
+
+        # ---- Core set ----
         self.add('sigmoid', sigmoid_activation)
         self.add('tanh', tanh_activation)
         self.add('sin', sin_activation)
         self.add('gauss', gauss_activation)
+
+        # ---- Newly added / aliases requested for CPPNs ----
+        self.add('linear', linear_activation)   # explicit alias
+        self.add('step', step_activation)
+        self.add('ramp', ramp_activation)
+
+        # ---- Additional pre‑existing functions ----
         self.add('relu', relu_activation)
         self.add('elu', elu_activation)
         self.add('lelu', lelu_activation)
         self.add('selu', selu_activation)
         self.add('softplus', softplus_activation)
-        self.add('identity', identity_activation)
+        self.add('identity', identity_activation)  # synonym of linear
         self.add('clamped', clamped_activation)
         self.add('inv', inv_activation)
         self.add('log', log_activation)
@@ -137,16 +198,17 @@ class ActivationFunctionSet(object):
         self.add('square', square_activation)
         self.add('cube', cube_activation)
 
+    # --------------------------- Registry API ---------------------------
+
     def add(self, name, function):
         validate_activation(function)
         self.functions[name] = function
 
     def get(self, name):
-        f = self.functions.get(name)
-        if f is None:
-            raise InvalidActivationFunction("No such activation function: {0!r}".format(name))
-
-        return f
+        try:
+            return self.functions[name]
+        except KeyError:
+            raise InvalidActivationFunction(f"No such activation function: {name!r}")
 
     def is_valid(self, name):
         return name in self.functions
