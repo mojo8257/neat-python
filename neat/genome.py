@@ -204,24 +204,24 @@ class DefaultGenome(object):
                 self.nodes[node_key] = node
 
             # 若要求 Locality-Seed, 插入高斯隐藏节点
-            if config.enable_leo and config.locality_seed == 'xaxis':
-                # 新建隐藏节点
-                hid_key = config.get_new_node_key(self.nodes)  # 自带递增
-                hid = self.create_node(config, hid_key)
-                hid.activation = 'gauss'
-                hid.bias = 0.0
-                self.nodes[hid_key] = hid
+        if config.enable_leo and config.locality_seed == 'xaxis':
+            # 新建隐藏节点
+            hid_key = config.get_new_node_key(self.nodes)  # 自带递增
+            hid = self.create_node(config, hid_key)
+            hid.activation = 'gauss'
+            hid.bias = 0.0
+            self.nodes[hid_key] = hid
 
-                # 输入节点假定顺序为   x1, y1, x2, y2, (常数)
-                x1_in, y1_in, x2_in, y2_in = config.input_keys[:4]
+            # 输入节点假定顺序为   x1, y1, x2, y2, (常数)
+            x1_in, y1_in, x2_in, y2_in = config.input_keys[:4]
 
-                # Δx = x1 - x2
-                self.add_connection(config, x1_in, hid_key, 1.0, True)  # +x1
-                self.add_connection(config, x2_in, hid_key, -1.0, True)  # -x2
+            # Δx = x1 - x2
+            self.add_connection(config, x1_in, hid_key, 1.0, True)  # +x1
+            self.add_connection(config, x2_in, hid_key, -1.0, True)  # -x2
 
-                # 高斯节点 → LEO（正权）
-                leo_key = config.leo_output_key
-                self.add_connection(config, hid_key, leo_key, 1.0, True)
+            # 高斯节点 → LEO（正权）
+            leo_key = config.leo_output_key
+            self.add_connection(config, hid_key, leo_key, 1.0, True)
 
         # Add connections based on initial connectivity type.
 
